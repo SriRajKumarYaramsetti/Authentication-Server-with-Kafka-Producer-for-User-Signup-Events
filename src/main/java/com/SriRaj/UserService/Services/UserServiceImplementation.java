@@ -3,6 +3,7 @@ package com.SriRaj.UserService.Services;
 
 import com.SriRaj.UserService.Dtos.UserResponseDto;
 import com.SriRaj.UserService.Dtos.ValidateResponseDto;
+import com.SriRaj.UserService.Dtos.sendEmailMessageDto;
 import com.SriRaj.UserService.Exceptions.InvalidPasswordException;
 import com.SriRaj.UserService.Exceptions.UserNotFoundException;
 import com.SriRaj.UserService.Models.Role;
@@ -11,6 +12,8 @@ import com.SriRaj.UserService.Models.SessionStatus;
 import com.SriRaj.UserService.Models.User;
 import com.SriRaj.UserService.Repository.SessionRepository;
 import com.SriRaj.UserService.Repository.UserRepository;
+import com.SriRaj.UserService.clients.KafkaProducerClient;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.Jwts;
@@ -31,15 +34,22 @@ import java.util.*;
 public class UserServiceImplementation implements  UserService{
     private UserRepository userRepository;
     private SessionRepository sessionRepository;
+    private KafkaProducerClient kafkaProducerClient;
+    private ObjectMapper objectMapper;
 
     @Value("${jwt.secret}")
     private String secretKey;
 
 
     @Autowired
-    public UserServiceImplementation(UserRepository userRepository,SessionRepository sessionRepository){
+    public UserServiceImplementation(UserRepository userRepository,
+                                     SessionRepository sessionRepository,
+                                     KafkaProducerClient kafkaProducerClient,
+                                     ObjectMapper objectMapper){
         this.userRepository=userRepository;
         this.sessionRepository=sessionRepository;
+        this.kafkaProducerClient=kafkaProducerClient;
+        this.objectMapper=objectMapper;
 
     }
     @Override
@@ -51,6 +61,21 @@ public class UserServiceImplementation implements  UserService{
         user.setPassword(password);
         user.setRoles(roles);
         User savedUser=userRepository.save(user);
+
+        try {
+            kafkaProducerClient.sendMessage("userSignup", objectMapper.writeValueAsString(savedUser));
+
+            sendEmailMessageDto emailMessage=new sendEmailMessageDto();
+            emailMessage.setTo(savedUser.getEmail());
+            emailMessage.setFrom("admin@gmail.com");
+            emailMessage.setSubject("Welcome to this platform");
+            emailMessage.setBody("Thanks for signning up into this service");
+            kafkaProducerClient.sendMessage("sendEmail", objectMapper.writeValueAsString(emailMessage));
+
+        }
+        catch (Exception e){
+            System.out.println("Something had gone wrong");
+        }
 
         return convertToUserResponseDto(savedUser);
     }
